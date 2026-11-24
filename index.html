@@ -2567,12 +2567,7 @@
     sfx('perk');
     if (net.role) net.myPick = net.offerWave; // online, the wave starts once everyone has picked
     else spawnWave();
-    if (perkRelock && canvas.requestPointerLock) { // straight back to mouse look
-      try {
-        const r = canvas.requestPointerLock();
-        if (r && r.catch) r.catch(() => { /* click the view to look around again */ });
-      } catch (e) { /* same */ }
-    }
+    if (perkRelock) lockPointer(); // straight back to mouse look
   }
   function takePerk(k) {
     taken.push(k);
@@ -3142,8 +3137,19 @@
   });
 
   // Mouse look: click the view to capture the mouse, then move it to turn. Click to fire.
+  // Raw mouse movement (no pointer acceleration) where the browser offers it, else the ordinary kind.
+  function lockPointer() {
+    if (!canvas.requestPointerLock) return;
+    const plain = () => {
+      try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { /* click the view to try again */ }); } catch (e) { /* no mouse look here */ }
+    };
+    try {
+      const r = canvas.requestPointerLock({ unadjustedMovement: true });
+      if (r && r.catch) r.catch(plain);
+    } catch (e) { plain(); }
+  }
   canvas.addEventListener('click', () => {
-    if (document.pointerLockElement !== canvas && canvas.requestPointerLock) canvas.requestPointerLock();
+    if (document.pointerLockElement !== canvas) lockPointer();
   });
   // The right button holds the scope up; it never opens the browser's menu over the view.
   canvas.addEventListener('mousedown', (e) => {
@@ -3156,8 +3162,29 @@
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('blur', () => { scopeMouse = false; }); // the button-up can be missed while away
+  // Now and then a browser reports an absurdly large mouse step while the mouse is captured, often followed by one
+  // straight back (Chrome on Linux is known for it), which snaps the view around. A step far bigger than the last
+  // few is held back: if the next is just as big and the same way, it was a real fast turn and both count;
+  // otherwise it is dropped. A big first step right after capturing is dropped too.
+  const recentSteps = [0, 0, 0, 0];
+  let firstStep = false, heldStep = 0;
+  document.addEventListener('pointerlockchange', () => { firstStep = true; heldStep = 0; recentSteps.fill(0); });
   document.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement === canvas) p.a += e.movementX * 0.002 * (settings.sens / 100) / scopeMag;
+    if (document.pointerLockElement !== canvas) return;
+    const dx = e.movementX || 0, size = Math.abs(dx);
+    if (firstStep) { firstStep = false; if (size > 50) return; }
+    const usual = Math.max(Math.abs(recentSteps[0]), Math.abs(recentSteps[1]), Math.abs(recentSteps[2]), Math.abs(recentSteps[3]));
+    let turn = dx;
+    if (size > 300 && size > usual * 5 + 100) {
+      if (!heldStep || Math.sign(heldStep) !== Math.sign(dx)) { heldStep = dx; return; }
+      turn = heldStep + dx;
+      recentSteps.shift();
+      recentSteps.push(heldStep);
+    }
+    heldStep = 0;
+    recentSteps.shift();
+    recentSteps.push(dx);
+    p.a += turn * 0.002 * (settings.sens / 100) / scopeMag;
   });
   // On-screen scope button: tap to raise the scope, tap again to lower it.
   scopeBtn.addEventListener('click', () => {
