@@ -329,7 +329,7 @@
       <h3>Games open now</h3>
       <div class="coop-list" id="coop-games"></div>
       <div class="panel-foot">
-        <span class="keyhint">Up to 4 players. Everyone you share Hellgrid with can join.</span>
+        <span class="keyhint" id="coop-lobby-hint">Up to 4 players. Everyone you share Hellgrid with can join.</span>
         <button type="button" id="coop-host">Host a game</button>
       </div>
     </div>
@@ -3372,7 +3372,7 @@
   const PLAYER_COLORS = ['#e0522f', '#4fa3ff', '#5bd16a', '#d36bff', '#ffd23f', '#3fe0d0'];
   const net = {
     lobby: null, game: null, role: null, name: '', phase: 'solo', ep: 0, myPeer: null, nick: '',
-    status: 'connecting', note: '', sentAt: 0, lobbyKey: '', teamAt: 0,
+    status: 'connecting', web: false, note: '', sentAt: 0, lobbyKey: '', teamAt: 0,
     myShots: [], shotSeq: 0, shotSeen: new Map(),
     myPick: 0, offerWave: 0, pickBy: 0, perkWave: 0, perkEnds: 0,
     hostSeenAt: 0, joinedAt: 0, lastHostState: null, demons: new Map(), synced: false,
@@ -3957,6 +3957,7 @@
     if (open) {
       if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
       $('coop-nick').value = net.nick;
+      if (net.status === 'web') connectWeb();
       renderCoop();
       $('close-coop').focus();
     } else {
@@ -3992,11 +3993,15 @@
     let note = net.note;
     if (!note && net.status === 'connecting') note = 'Connecting…';
     if (!note && net.status === 'off') note = 'Online co-op works when Hellgrid is open on claude.ai. Share it from there, and anyone it is shared with can join while you play.';
+    if (!note && net.status === 'weboff') note = 'Couldn’t reach the co-op servers. Check your internet connection, then close and open Co-op to try again.';
     if (!note && net.role) note = 'The game runs in the host’s browser, so the host should keep this tab open and in front.';
     $('coop-note').textContent = note;
     $('coop-lobby').hidden = !!net.role;
     $('coop-ingame').hidden = !net.role;
     $('coop-host').disabled = !net.lobby;
+    $('coop-lobby-hint').textContent = net.web
+      ? 'Up to 4 players. Anyone playing on this website can see and join an open game.'
+      : 'Up to 4 players. Everyone you share Hellgrid with can join.';
     if (!net.role) {
       const list = $('coop-games');
       list.textContent = '';
@@ -4047,8 +4052,93 @@
     lobbyPresence();
   });
 
-  // Connect to the page's live room. It only exists when the game is open on claude.ai; anywhere else (or for a
-  // viewer the room can't take) co-op says so and the game is single-player as before.
+  // ---- co-op on the website ----
+  // Off claude.ai there is no room capability, so the website brings its own: the open-source Trystero library finds
+  // the other players through public Nostr relays, then connects the browsers to each other directly (WebRTC). It
+  // offers the calls the game uses from claude.ai's room (presence, peers, onPeers, join, leave), so the rest of the
+  // co-op code is the same in both places. It loads only when the Co-op panel is first opened.
+  const TRYSTERO = 'https://cdn.jsdelivr.net/npm/trystero@0.27.0/+esm';
+  let webLoading = null;
+  async function webLobby() {
+    const { joinRoom } = await import(TRYSTERO);
+    const open = (name) => {
+      // identity 'none': every open page is its own player, as on claude.ai (two tabs can play each other).
+      const room = joinRoom({ appId: 'thenucleardonkey.github.io/hellgrid', identity: 'none' }, name);
+      const msg = room.makeAction('p');
+      const others = new Map();
+      let mine = {}, self = 'me', snap = [], listeners = [], dirty = false, gone = false, sentAt = 0;
+      const rebuild = () => {
+        const you = Object.freeze({ peer: self, by: null, isMe: true, sameTab: true, kind: 'viewer', guest: false, presence: Object.freeze(Object.assign({}, mine)), updatedAt: Date.now() });
+        snap = Object.freeze([you].concat(Array.from(others.values())));
+      };
+      const changed = () => {
+        rebuild();
+        for (const fn of listeners.slice()) { try { fn({ peers: snap }); } catch (e) { /* the listener's own problem */ } }
+      };
+      room.getSelf().then((info) => { self = info.peerId; changed(); }, () => { /* keep the placeholder */ });
+      msg.onMessage((data, ctx) => {
+        if (gone || !data || typeof data !== 'object' || Array.isArray(data)) return;
+        others.set(ctx.peerId, Object.freeze({ peer: ctx.peerId, by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false, presence: Object.freeze(data), updatedAt: Date.now() }));
+        changed();
+      });
+      room.onPeerJoin((ctx) => { msg.send(mine, { target: ctx.peerId }).catch(() => { /* they'll get the next one */ }); }, { replay: true });
+      room.onPeerLeave((ctx) => { if (others.delete(ctx.peerId)) changed(); });
+      // Like presence on claude.ai: your latest state goes out about 25 times a second while it changes, and every
+      // 2 seconds regardless, so a lost message is soon made good.
+      const tick = setInterval(() => {
+        const now = Date.now();
+        if (gone || (!dirty && now - sentAt < 2000)) return;
+        dirty = false;
+        sentAt = now;
+        msg.send(mine).catch(() => { /* the next one carries the same state */ });
+      }, 40);
+      rebuild();
+      return {
+        name: name,
+        presence(patch) {
+          const next = Object.assign({}, mine);
+          for (const k in patch) { if (patch[k] === null) delete next[k]; else next[k] = patch[k]; }
+          mine = next;
+          dirty = true;
+          rebuild();
+          return Promise.resolve();
+        },
+        peers: () => snap,
+        onPeers(fn) { listeners.push(fn); setTimeout(() => fn({ peers: snap }), 0); return () => { listeners = listeners.filter((f) => f !== fn); }; },
+        connected: () => !gone,
+        leave() {
+          if (gone) return Promise.resolve();
+          gone = true;
+          clearInterval(tick);
+          listeners = [];
+          return room.leave().catch(() => { /* gone anyway */ });
+        }
+      };
+    };
+    const lobby = open('lobby');
+    lobby.join = async (name) => open(name);
+    return lobby;
+  }
+  function connectWeb() {
+    if (webLoading) return;
+    net.status = 'connecting';
+    webLoading = webLobby().then((lobby) => {
+      net.lobby = lobby;
+      net.status = 'on';
+      lobby.onPeers(() => renderCoop());
+      lobbyPresence();
+      renderCoop();
+    }, () => {
+      net.status = 'weboff';
+      webLoading = null;
+      renderCoop();
+    });
+    renderCoop();
+  }
+
+  // Connect to the page's live room. It only exists when the game is open on claude.ai (where a viewer the room can't
+  // take gets single-player only). Anywhere else, co-op uses the website's own connection, made when the Co-op panel
+  // is first opened.
   (function connect(tries) {
     if (window.claude && typeof window.claude.use === 'function') {
       window.claude.use('room').then((room) => {
@@ -4066,7 +4156,12 @@
         renderCoop();
       }, () => { net.status = 'off'; renderCoop(); });
     } else if (tries > 0) setTimeout(() => connect(tries - 1), 500);
-    else { net.status = 'off'; renderCoop(); }
+    else {
+      net.status = 'web';
+      net.web = true;
+      if (coopOpen) connectWeb();
+      renderCoop();
+    }
   })(6);
 
   applyQuality();
