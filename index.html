@@ -227,6 +227,18 @@
   }
   .team[hidden], .banner[hidden] { display: none; }
 
+  /* Voice chat: the badge while you're talking, the touch TALK button, the settings note and mute buttons. */
+  .mic-hud {
+    position: absolute; right: 10px; bottom: 8px; z-index: 3; padding: 3px 9px; border-radius: 8px;
+    background: rgba(224, 82, 47, 0.85); color: #fff; font-size: 12px; font-weight: 700; pointer-events: none;
+  }
+  .mic-hud[hidden], .talk[hidden] { display: none; }
+  .talk { font-weight: 700; padding: 14px 20px; }
+  .talk:active { background: var(--accent); color: #fff; }
+  .voice-note { margin: 2px 0 6px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .coop-item .mute { padding: 5px 10px; font-size: 13px; }
+  .coop-item .mute[aria-pressed="true"] { background: #3a1a14; border-color: var(--accent); }
+
   /* Home screen: shown when the game opens, and as the pause menu (Menu button or Esc). It covers the page; the
      settings and co-op panels open over it. */
   .home {
@@ -313,6 +325,7 @@
   <div class="perk-hud" id="perk-hud" hidden></div>
   <div class="team" id="team" hidden></div>
   <div class="banner" id="banner" role="status" hidden></div>
+  <div class="mic-hud" id="mic-hud" hidden>🎤 Talking</div>
 </div>
 <div class="hud">
   <span class="hp">HP <b id="hp">100</b></span>
@@ -339,6 +352,7 @@
     <button type="button" class="fire" data-key="fire" aria-label="Fire">FIRE</button>
     <button type="button" class="reload" data-key="reload" aria-label="Reload">RELOAD</button>
     <button type="button" class="scope" id="scope-btn" aria-pressed="false" aria-label="Scope">SCOPE</button>
+    <button type="button" class="talk" id="talk-btn" data-key="talk" aria-label="Hold to talk" hidden>🎤 TALK</button>
   </div>
 </div>
 <p class="hint">WASD or arrows to move, Space or F to fire, R to reload, right mouse button or E to scope. Click the view for mouse look. Esc opens the menu.</p>
@@ -370,6 +384,18 @@
     <label class="row"><span>Effects<b id="sfx-val"></b></span><input type="range" id="sfx" min="0" max="100" step="5"></label>
     <label class="row"><span>Music<b id="music-val"></b></span><input type="range" id="music" min="0" max="100" step="5"></label>
     <label class="row"><span>Mute</span><input type="checkbox" id="mute"></label>
+
+    <h3>Voice chat</h3>
+    <p class="voice-note" id="voice-note"></p>
+    <label class="row"><span>Voice volume<b id="voice-val"></b></span><input type="range" id="voice" min="0" max="100" step="5"></label>
+    <div class="row">
+      <span>Microphone</span>
+      <div class="seg" role="group" aria-label="Microphone">
+        <button type="button" data-mic="off">Off</button>
+        <button type="button" data-mic="ptt">Push to talk</button>
+        <button type="button" data-mic="open">Open mic</button>
+      </div>
+    </div>
 
     <h3>Controls</h3>
     <label class="row"><span>Mouse sensitivity<b id="sens-val"></b></span><input type="range" id="sens" min="25" max="300" step="5"></label>
@@ -541,14 +567,15 @@
     { id: 'forward', label: 'Forward' }, { id: 'back', label: 'Back' },
     { id: 'turnL', label: 'Turn left' }, { id: 'turnR', label: 'Turn right' },
     { id: 'strafeL', label: 'Strafe left' }, { id: 'strafeR', label: 'Strafe right' },
-    { id: 'fire', label: 'Fire' }, { id: 'reload', label: 'Reload' }, { id: 'scope', label: 'Scope' }
+    { id: 'fire', label: 'Fire' }, { id: 'reload', label: 'Reload' }, { id: 'scope', label: 'Scope' },
+    { id: 'talk', label: 'Talk (voice chat)' }
   ];
   // Two key slots per action. null = unbound.
   const DEFAULT_BINDS = {
     forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'],
     turnL: ['ArrowLeft', null], turnR: ['ArrowRight', null],
     strafeL: ['KeyA', null], strafeR: ['KeyD', null],
-    fire: ['Space', 'KeyF'], reload: ['KeyR', null], scope: ['KeyE', null]
+    fire: ['Space', 'KeyF'], reload: ['KeyR', null], scope: ['KeyE', null], talk: ['KeyV', null]
   };
   // pr = max render pixel ratio, tex = level texture size in pixels, aniso = max anisotropic filtering.
   const QUALITY = {
@@ -558,7 +585,7 @@
   };
   const DEFAULT_SETTINGS = {
     quality: 'high', brightness: 100, vignette: true, flicker: true, shake: true, fps: false,
-    master: 80, sfx: 90, music: 40, mute: false,
+    master: 80, sfx: 90, music: 40, mute: false, voice: 80, mic: 'off',
     sens: 100, binds: DEFAULT_BINDS
   };
   const settings = loadSettings();
@@ -585,6 +612,7 @@
       }
     } catch (e) { /* storage unavailable: keep defaults */ }
     if (!QUALITY[s.quality]) s.quality = 'high';
+    if (!['off', 'ptt', 'open'].includes(s.mic)) s.mic = 'off';
     return s;
   }
   function saveSettings() {
@@ -598,6 +626,8 @@
   }
   rebuildKeymap();
   const keys = {};
+  // Menus let go of held keys, except Talk: you can keep talking while choosing a perk or changing a setting.
+  function releaseKeys() { for (const k of Object.keys(keys)) if (k !== 'talk') keys[k] = false; }
 
   // ---- sound: everything is synthesised with Web Audio, so there are no files to load ----
   let actx = null, busMaster = null, busSfx = null, busMusic = null, noiseBuf = null;
@@ -627,6 +657,7 @@
     busMaster.gain.setTargetAtTime(settings.mute ? 0 : settings.master / 100, t, 0.02);
     busSfx.gain.setTargetAtTime(settings.sfx / 100, t, 0.02);
     busMusic.gain.setTargetAtTime(settings.music / 100 * 0.35, t, 0.02);
+    if (voice.bus) voice.bus.gain.setTargetAtTime(settings.voice / 100, t, 0.02);
   }
   // Ambient score: a detuned low drone through a slowly sweeping filter, swelling like a heartbeat.
   function startMusic() {
@@ -2670,7 +2701,7 @@
     if (!perkOffer.length) { if (net.role) net.myPick = net.offerWave; else spawnWave(); return; }
     perkOpen = true;
     perkShownAt = performance.now();
-    for (const k of Object.keys(keys)) keys[k] = false; // nothing stays held while the game waits
+    releaseKeys(); // nothing stays held while the game waits
     scopeMouse = false;
     perkRelock = document.pointerLockElement === canvas;
     if (perkRelock) releasePointer(); // bring back the cursor for the cards
@@ -3233,6 +3264,7 @@
       else setHomeOpen(true);
       return;
     }
+    if (KEYMAP[e.code] === 'talk' && !(e.target instanceof HTMLInputElement)) { keys.talk = true; e.preventDefault(); return; }
     if (settingsOpen || coopOpen || homeOpen || e.target instanceof HTMLInputElement) return;
     // While choosing a perk, 1 2 3 pick a card and the game keys rest (Tab and Enter still work on the cards).
     if (perkOpen) {
@@ -3301,7 +3333,7 @@
     else keys.fire = false;
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  window.addEventListener('blur', () => { scopeMouse = false; }); // the button-up can be missed while away
+  window.addEventListener('blur', () => { scopeMouse = false; keys.talk = false; }); // the button-up can be missed while away
   // Now and then a browser reports an absurdly large mouse step while the mouse is captured, often followed by one
   // straight back (Chrome on Linux is known for it), which snaps the view around. A step far bigger than the last
   // few is held back: if the next is just as big and the same way, it was a real fast turn and both count;
@@ -3357,7 +3389,7 @@
     settingsOpen = open;
     capture = null;
     panel.hidden = !open;
-    for (const k of Object.keys(keys)) keys[k] = false;
+    releaseKeys();
     scopeMouse = false;
     if (open) {
       releasePointer();
@@ -3368,14 +3400,43 @@
     }
   }
 
-  const SLIDERS = [['brightness', 'brightness'], ['master', 'master'], ['sfx', 'sfx'], ['music', 'music'], ['sens', 'sens']];
+  const SLIDERS = [['brightness', 'brightness'], ['master', 'master'], ['sfx', 'sfx'], ['music', 'music'], ['voice', 'voice'], ['sens', 'sens']];
   const TOGGLES = [['vignette', 'vignette'], ['flicker', 'flicker'], ['shake-toggle', 'shake'], ['fps-toggle', 'fps'], ['mute', 'mute']];
   function syncPanel() {
     for (const [id, key] of SLIDERS) { $(id).value = settings[key]; $(id + '-val').textContent = settings[key] + '%'; }
     for (const [id, key] of TOGGLES) $(id).checked = !!settings[key];
     document.querySelectorAll('[data-quality]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.quality === settings.quality)));
+    document.querySelectorAll('[data-mic]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.mic === settings.mic));
+      b.disabled = b.dataset.mic !== 'off' && !voice.canSend;
+    });
+    $('voice-note').textContent = voiceNote();
     renderBinds();
   }
+  function voiceNote() {
+    if (!net.web) return 'Voice chat works in online games on the Hellgrid website.';
+    if (!voice.canHear) return 'This browser can’t do voice chat. A recent Chrome, Edge, Firefox or Safari can.';
+    if (!voice.canSend) return 'You’ll hear players near you in online games, but this browser can’t send your voice.';
+    if (voice.micError === 'denied') return 'Hellgrid isn’t allowed to use your microphone. Allow it in your browser’s site settings, then pick a microphone mode again.';
+    if (voice.micError) return 'Your microphone didn’t start. Check it’s plugged in, then pick a microphone mode again.';
+    const talkKey = settings.binds.talk.find((c) => c);
+    if (settings.mic === 'ptt') return talkKey ? 'In online games, hold ' + keyName(talkKey) + ' (or TALK on a touch screen) to talk. Players hear you louder the closer they are.' : 'Give Talk a key below to talk.';
+    if (settings.mic === 'open') return 'In online games, players near you hear you whenever you speak. Headphones stop them hearing themselves through you.';
+    return 'Hear players near you in online games, louder the closer they are. Pick a microphone mode to talk too.';
+  }
+  document.querySelectorAll('[data-mic]').forEach((b) => {
+    b.addEventListener('click', () => {
+      settings.mic = b.dataset.mic;
+      voice.micError = '';
+      saveSettings();
+      syncPanel();
+      // Ask for the microphone now, while you're here, rather than in the middle of a game.
+      if (settings.mic !== 'off' && voice.canSend && net.web) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((st) => st.getTracks().forEach((t) => t.stop()),
+          (e) => { voice.micError = e && e.name === 'NotAllowedError' ? 'denied' : 'failed'; syncPanel(); });
+      }
+    });
+  });
   for (const [id, key] of SLIDERS) {
     $(id).addEventListener('input', (e) => {
       settings[key] = Number(e.target.value);
@@ -3553,7 +3614,7 @@
     ]);
     return Object.assign(mine('h'), {
       ph: net.phase, w: wave, pw: net.perkWave, pt: Math.max(0, Math.ceil((net.perkEnds - performance.now()) / 1000)),
-      ow: won ? 1 : 0, df: diffName(), ds: demonSlow(), d: d, k: k, pl: pl
+      ow: won ? 1 : 0, df: diffName(), ds: demonSlow(), d: d, k: k, pl: pl, vk: hostVoiceState()
     });
   }
   function sendPresence(force) {
@@ -3658,6 +3719,8 @@
     }
     for (const rec of others.slice()) {
       if (seen.has(rec.id)) continue;
+      dropVoicePeer(rec.id);
+      if (net.role === 'host' && voice.raw) newVoiceKey();
       dropAvatar(rec);
       net.shotSeen.delete(rec.id);
       others.splice(others.indexOf(rec), 1);
@@ -3915,7 +3978,7 @@
       if (!o.avatar) { o.avatar = makeAvatar(o.color); o.avatar.x = o.x; o.avatar.y = o.y; o.avatar.a = o.a; }
       const av = o.avatar;
       if (av.color !== o.color) paintAvatar(av, o.color);
-      const label = o.down ? o.nick + ' · down' : o.nick;
+      const label = (isTalking(o) ? '🔊 ' : '') + (o.down ? o.nick + ' · down' : o.nick);
       if (av.label !== label) setTag(av, label);
       const ox = av.x, oy = av.y;
       av.x += (o.x - av.x) * f;
@@ -3949,6 +4012,7 @@
     reset();
     setHomeOpen(false);
     g.onPeers(() => renderCoop(), () => leaveGame('Lost the connection to the game.'));
+    if (g.relay) { g.relay.onEmit(hearVoice); newVoiceKey(); }
     sendPresence(true);
     lobbyPresence();
     renderCoop();
@@ -3963,6 +4027,7 @@
     guestNewGame();
     setHomeOpen(false);
     g.onPeers(() => renderCoop(), () => leaveGame('Lost the connection to the game.'));
+    if (g.relay) g.relay.onEmit(hearVoice);
     sendPresence(true);
     lobbyPresence();
     renderCoop();
@@ -3971,6 +4036,7 @@
     const g = net.game;
     net.game = null; net.role = null; net.name = ''; net.phase = 'solo'; net.ep = 0;
     if (g) g.leave().catch(() => { /* gone already */ });
+    voiceReset();
     for (const o of others) dropAvatar(o);
     others = []; players = [me]; net.shotSeen.clear(); net.demons.clear(); net.myPick = 0; net.offerWave = 0;
     me.color = 0;
@@ -4015,6 +4081,7 @@
       if (host) {
         net.hostSeenAt = now;
         if (host.presence !== net.lastHostState) { net.lastHostState = host.presence; applyHostState(host.presence); }
+        if (host.presence.vk) takeVoiceKey(host.peer, host.presence.vk);
         if (net.myPeer && net.ep > 0 && !net.stats.has(net.myPeer) && now - net.joinedAt > 4000 && net.stats.size >= MAX_PLAYERS) {
           leaveGame('That game is full: ' + MAX_PLAYERS + ' players at most.');
           return;
@@ -4042,6 +4109,7 @@
       if (now >= net.pickBy) autoPick();
     }
     updateAvatars(dt);
+    voiceStep();
     sendPresence(false);
     if (now - net.teamAt > 250) { net.teamAt = now; renderTeam(); lobbyPresence(); }
   }
@@ -4059,7 +4127,7 @@
       dot.className = 'dot';
       dot.style.background = PLAYER_COLORS[pl.color] || PLAYER_COLORS[0];
       const name = document.createElement('span');
-      name.textContent = pl.local ? net.nick + ' (you)' : pl.nick;
+      name.textContent = (!pl.local && voice.muted.has(pl.id) ? '🔇 ' : isTalking(pl) ? '🔊 ' : '') + (pl.local ? net.nick + ' (you)' : pl.nick);
       const health = document.createElement('b');
       health.textContent = pl.down ? 'down' : String(Math.ceil(pl.hp));
       if (pl.down) row.className = 'down';
@@ -4088,7 +4156,7 @@
     if (open && settingsOpen) setSettingsOpen(false);
     coopOpen = open;
     coopEl.hidden = !open;
-    for (const k of Object.keys(keys)) keys[k] = false;
+    releaseKeys();
     scopeMouse = false;
     if (open) {
       releasePointer();
@@ -4166,15 +4234,34 @@
         list.appendChild(empty);
       }
     } else {
-      const list = $('coop-players');
-      list.textContent = '';
-      for (const pl of players) {
-        const host = pl.local ? net.role === 'host' : pl.isHost;
-        list.appendChild(coopItem({ text: pl.local ? net.nick + ' (you)' : pl.nick, color: pl.color }, host ? 'host' : ''));
+      const list = $('coop-players'), withVoice = voiceOn();
+      const shown = JSON.stringify(players.map((pl) => [pl.local ? net.nick : pl.nick, pl.color, pl.local ? net.role : pl.isHost, pl.id, voice.muted.has(pl.id)]).concat([withVoice]));
+      if (list.dataset.shown !== shown) {
+        list.dataset.shown = shown;
+        list.textContent = '';
+        for (const pl of players) {
+          const host = pl.local ? net.role === 'host' : pl.isHost;
+          let mute = null;
+          if (withVoice && !pl.local) {
+            const muted = voice.muted.has(pl.id);
+            mute = document.createElement('button');
+            mute.type = 'button';
+            mute.className = 'mute';
+            mute.textContent = muted ? '🔇 Muted' : '🔊 Mute';
+            mute.setAttribute('aria-pressed', String(muted));
+            mute.setAttribute('aria-label', 'Mute ' + pl.nick + '’s voice');
+            mute.addEventListener('click', () => {
+              if (voice.muted.has(pl.id)) voice.muted.delete(pl.id); else voice.muted.add(pl.id);
+              renderCoop();
+              renderTeam();
+            });
+          }
+          list.appendChild(coopItem({ text: pl.local ? net.nick + ' (you)' : pl.nick, color: pl.color }, host ? 'host' : '', mute));
+        }
       }
       $('coop-start').hidden = net.role !== 'host' || net.phase !== 'wait';
       $('coop-hint').textContent = net.role === 'host'
-        ? (net.phase === 'wait' ? 'Start when everyone is here. Others can still join later.' : 'Difficulty and Play again restart the game for everyone.')
+        ? (net.phase === 'wait' ? 'Start when everyone is here. Others can still join later.' : 'Play again, or Restart for everyone in the menu, starts over for everyone.')
         : 'The host starts the game and picks the difficulty.';
     }
   }
@@ -4192,6 +4279,284 @@
     lobbyPresence();
   });
 
+  // ---- proximity voice chat (online games on the website) ----
+  // Players in an online game can talk. Your microphone is compressed with the browser's own Opus encoder in 20 ms
+  // frames, five at a time (a tenth of a second), locked with the game's voice key, and sent through the relays like
+  // everything else. Each voice comes from where that player stands: full volume close by, fading to nothing about
+  // 9 cells away, panned by where they are around you, and muffled through walls. The host makes the voice key and
+  // seals a copy for each player in the game, so only the players in the list can listen, and makes a new one
+  // whenever someone leaves. It needs the website (claude.ai's room can't carry sound) and a browser with WebCodecs.
+  const VOICE_FULL = 2, VOICE_RANGE = 9; // cells: full volume within VOICE_FULL, silent beyond VOICE_RANGE
+  const MIC_WORKLET = 'registerProcessor("hg-mic", class extends AudioWorkletProcessor {' +
+    'constructor() { super(); this.n = Math.round(sampleRate / 50); this.buf = new Float32Array(this.n); this.i = 0; }' +
+    'process(inputs) { const c = inputs[0] && inputs[0][0]; if (c) for (let k = 0; k < c.length; k++) {' +
+    'this.buf[this.i++] = c[k]; if (this.i === this.n) { this.port.postMessage(this.buf, [this.buf.buffer]); this.buf = new Float32Array(this.n); this.i = 0; } }' +
+    'return true; } });';
+  const micHudEl = document.getElementById('mic-hud'), talkBtn = document.getElementById('talk-btn');
+  const voice = {
+    canSend: false, canHear: false, micError: '', workletReady: false,
+    stream: null, src: null, node: null, sink: null, encoder: null, starting: false,
+    ts: 0, batch: [], talking: false, gateUntil: 0,
+    keyId: '', key: null, keys: new Map(), raw: null, sealed: new Map(), unsealing: '',
+    peers: new Map(), muted: new Set(), bus: null
+  };
+  const toB64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); };
+  const fromB64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  (async function voiceSupport() {
+    try {
+      if (typeof AudioDecoder === 'function') {
+        voice.canHear = !!(await AudioDecoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 })).supported;
+      }
+      if (voice.canHear && typeof AudioEncoder === 'function' && typeof AudioWorkletNode === 'function' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        voice.canSend = !!(await AudioEncoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: 20000 })).supported;
+      }
+    } catch (e) { /* no voice chat in this browser */ }
+    if (settingsOpen) syncPanel();
+  })();
+  const voiceOn = () => !!(net.game && net.game.relay && net.lobby && net.lobby.relay && net.lobby.relay.seal);
+  const micWanted = () => settings.mic !== 'off' && voice.canSend && !voice.micError && voiceOn() && !!actx;
+
+  // Your microphone runs while you're in an online game with it switched on (the browser shows that it's in use);
+  // only what you say while talking is sent.
+  async function startMic() {
+    if (voice.stream || voice.starting) return;
+    voice.starting = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+      if (!micWanted()) { stream.getTracks().forEach((t) => t.stop()); return; }
+      if (!voice.workletReady) {
+        const url = URL.createObjectURL(new Blob([MIC_WORKLET], { type: 'application/javascript' }));
+        try { await actx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        voice.workletReady = true;
+      }
+      voice.stream = stream;
+      voice.src = actx.createMediaStreamSource(stream);
+      voice.node = new AudioWorkletNode(actx, 'hg-mic', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: 'explicit' });
+      voice.sink = actx.createGain();
+      voice.sink.gain.value = 0; // it has to reach the speakers to keep running, but silently
+      voice.src.connect(voice.node);
+      voice.node.connect(voice.sink);
+      voice.sink.connect(actx.destination);
+      voice.node.port.onmessage = (e) => micFrame(e.data);
+      voice.encoder = new AudioEncoder({
+        output: (chunk) => {
+          const b = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(b);
+          voice.batch.push(b);
+          if (voice.batch.length >= 5) sendVoice();
+        },
+        error: () => { voice.micError = 'failed'; stopMic(); }
+      });
+      voice.encoder.configure({ codec: 'opus', sampleRate: actx.sampleRate, numberOfChannels: 1, bitrate: 20000 });
+    } catch (e) {
+      voice.micError = e && e.name === 'NotAllowedError' ? 'denied' : 'failed';
+      stopMic();
+    } finally {
+      voice.starting = false;
+      if (settingsOpen) syncPanel();
+    }
+  }
+  function stopMic() {
+    if (voice.stream) voice.stream.getTracks().forEach((t) => t.stop());
+    if (voice.node) voice.node.port.onmessage = null;
+    for (const n of [voice.src, voice.node, voice.sink]) if (n) { try { n.disconnect(); } catch (e) { /* already */ } }
+    if (voice.encoder && voice.encoder.state !== 'closed') { try { voice.encoder.close(); } catch (e) { /* already */ } }
+    Object.assign(voice, { stream: null, src: null, node: null, sink: null, encoder: null, batch: [], talking: false, gateUntil: 0 });
+  }
+  // Every 20 ms of microphone sound: send it while you're talking (holding the talk key, or speaking up with an
+  // open mic) and someone is there to hear it.
+  function micFrame(buf) {
+    if (!voice.encoder || voice.encoder.state !== 'configured') return;
+    const now = performance.now();
+    let open = false;
+    if (settings.mic === 'ptt') open = !!keys.talk;
+    else if (settings.mic === 'open') {
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      if (Math.sqrt(sum / buf.length) > 0.015) voice.gateUntil = now + 450; // and a moment after, so words aren't clipped
+      open = now < voice.gateUntil;
+    }
+    open = open && voiceOn() && others.length > 0 && !!voice.key;
+    if (open) {
+      voice.encoder.encode(new AudioData({ format: 'f32', sampleRate: actx.sampleRate, numberOfFrames: buf.length, numberOfChannels: 1, timestamp: voice.ts, data: buf }));
+      voice.ts += Math.round(buf.length / actx.sampleRate * 1e6);
+    } else if (voice.talking) {
+      voice.encoder.flush().then(() => sendVoice(), () => { /* closed meanwhile */ }); // your last words
+    }
+    voice.talking = open;
+  }
+  // A message: the frame count, then each frame's length and bytes, all locked with the voice key.
+  async function sendVoice() {
+    const frames = voice.batch;
+    voice.batch = [];
+    const g = net.game;
+    if (!frames.length || !voice.key || !g || !g.relay) return;
+    let size = 1;
+    for (const f of frames) size += 2 + f.length;
+    const plain = new Uint8Array(size);
+    plain[0] = frames.length;
+    let o = 1;
+    for (const f of frames) { plain[o] = f.length >> 8; plain[o + 1] = f.length & 255; plain.set(f, o + 2); o += 2 + f.length; }
+    const iv = crypto.getRandomValues(new Uint8Array(12)), id = voice.keyId;
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, voice.key, plain));
+    const out = new Uint8Array(12 + ct.length);
+    out.set(iv);
+    out.set(ct, 12);
+    g.relay.emit({ i: id, a: toB64(out) });
+  }
+
+  // Hearing: only from players in the game, only with a key the host gave out.
+  async function hearVoice(d, peer) {
+    if (!d || typeof d.a !== 'string' || d.a.length > 6000 || typeof d.i !== 'string') return;
+    const rec = others.find((o) => o.id === peer), key = voice.keys.get(d.i);
+    if (!rec || !key) return;
+    let plain;
+    try {
+      const all = fromB64(d.a);
+      plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.subarray(0, 12) }, key, all.subarray(12)));
+    } catch (e) { return; }
+    rec.talkUntil = performance.now() + 400;
+    if (voice.muted.has(peer) || !actx || !voice.canHear || settings.voice === 0 || settings.mute) return;
+    const ps = voicePeer(peer);
+    if (!ps) return;
+    let o = 1;
+    for (let k = 0; k < plain[0] && o + 2 <= plain.length; k++) {
+      const len = (plain[o] << 8) | plain[o + 1];
+      o += 2;
+      if (o + len > plain.length) break;
+      try { ps.decoder.decode(new EncodedAudioChunk({ type: 'key', timestamp: ps.ts, data: plain.subarray(o, o + len) })); } catch (e) { break; }
+      ps.ts += 20000;
+      o += len;
+    }
+  }
+  // Each voice you hear: decoder -> volume -> wall muffle -> left/right -> the voice volume -> master.
+  function voicePeer(peer) {
+    let ps = voice.peers.get(peer);
+    if (ps) return ps;
+    if (!voice.bus) {
+      voice.bus = actx.createGain();
+      voice.bus.gain.value = settings.voice / 100;
+      voice.bus.connect(busMaster);
+    }
+    const gain = actx.createGain();
+    gain.gain.value = 0;
+    const lp = actx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 16000;
+    const pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
+    gain.connect(lp);
+    if (pan) { lp.connect(pan); pan.connect(voice.bus); } else lp.connect(voice.bus);
+    ps = { gain: gain, lp: lp, pan: pan, playAt: 0, ts: 0, decoder: null };
+    try {
+      ps.decoder = new AudioDecoder({ output: (ad) => playVoice(ps, ad), error: () => dropVoicePeer(peer) });
+      ps.decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 });
+    } catch (e) {
+      for (const n of [gain, lp, pan]) if (n) n.disconnect();
+      return null;
+    }
+    voice.peers.set(peer, ps);
+    placeVoice(peer, ps, true);
+    return ps;
+  }
+  // Decoded sound is queued back to back; after a pause, or when it has fallen far behind, it starts again with a
+  // short cushion so a late message doesn't break it up.
+  function playVoice(ps, ad) {
+    try {
+      const n = ad.numberOfFrames, data = new Float32Array(n);
+      ad.copyTo(data, { planeIndex: 0, format: 'f32-planar' });
+      const buf = actx.createBuffer(1, n, ad.sampleRate);
+      buf.copyToChannel(data, 0);
+      const t = actx.currentTime;
+      if (ps.playAt < t + 0.03 || ps.playAt > t + 1) ps.playAt = t + 0.12;
+      const src = actx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ps.gain);
+      src.start(ps.playAt);
+      ps.playAt += buf.duration;
+    } catch (e) { /* skip this bit */ } finally { ad.close(); }
+  }
+  function dropVoicePeer(peer) {
+    const ps = voice.peers.get(peer);
+    if (!ps) return;
+    voice.peers.delete(peer);
+    for (const n of [ps.gain, ps.lp, ps.pan]) if (n) { try { n.disconnect(); } catch (e) { /* already */ } }
+    if (ps.decoder && ps.decoder.state !== 'closed') { try { ps.decoder.close(); } catch (e) { /* already */ } }
+  }
+  const clearLine = (x0, y0, x1, y1) => {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.15);
+    for (let i = 1; i < n; i++) if (cellAt(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n) !== '0') return false;
+    return true;
+  };
+  function placeVoice(peer, ps, now) {
+    const o = others.find((x) => x.id === peer);
+    if (!o) return false;
+    const d = Math.hypot(o.x - p.x, o.y - p.y);
+    const near = Math.min(1, Math.max(0, (VOICE_RANGE - d) / (VOICE_RANGE - VOICE_FULL)));
+    const walled = !clearLine(p.x, p.y, o.x, o.y);
+    const vol = voice.muted.has(peer) ? 0 : near * near * (walled ? 0.6 : 1);
+    const side = Math.max(-1, Math.min(1, Math.sin(Math.atan2(o.y - p.y, o.x - p.x) - p.a) * 0.85)); // + is to your right
+    const t = actx.currentTime, k = now ? 0.001 : 0.06;
+    ps.gain.gain.setTargetAtTime(vol, t, k);
+    ps.lp.frequency.setTargetAtTime(walled ? 900 : 16000, t, k);
+    if (ps.pan) ps.pan.pan.setTargetAtTime(side, t, k);
+    return true;
+  }
+  // Every frame online: the microphone on or off as wanted, and every voice placed where its player is.
+  function voiceStep() {
+    if (micWanted()) { if (!voice.stream) startMic(); } else if (voice.stream) stopMic();
+    for (const [peer, ps] of voice.peers) if (!placeVoice(peer, ps, false)) dropVoicePeer(peer);
+    micHudEl.hidden = !voice.talking;
+    talkBtn.hidden = !(settings.mic === 'ptt' && voice.canSend && voiceOn());
+  }
+  function voiceReset() {
+    stopMic();
+    for (const peer of Array.from(voice.peers.keys())) dropVoicePeer(peer);
+    Object.assign(voice, { keyId: '', key: null, keys: new Map(), raw: null, sealed: new Map(), unsealing: '' });
+    voice.muted.clear();
+    micHudEl.hidden = true;
+    talkBtn.hidden = true;
+  }
+  const isTalking = (pl) => (pl.local ? voice.talking : (pl.talkUntil || 0) > performance.now());
+
+  // The voice key. The host makes it, keeps it in the game state sealed separately for each player, and makes a
+  // new one when someone leaves (so they can't listen in afterwards). Players open their copy with the host's id.
+  async function newVoiceKey() {
+    const raw = crypto.getRandomValues(new Uint8Array(16)), id = Math.random().toString(36).slice(2, 8);
+    const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+    if (net.role !== 'host') return;
+    keepVoiceKey(id, key);
+    voice.raw = raw;
+    voice.sealed = new Map();
+  }
+  function keepVoiceKey(id, key) {
+    voice.keys.set(id, key);
+    voice.keyId = id;
+    voice.key = key;
+    while (voice.keys.size > 3) voice.keys.delete(voice.keys.keys().next().value); // the last few still open late messages
+  }
+  function hostVoiceState() {
+    if (!voice.raw || !voiceOn()) return undefined;
+    const sealed = voice.sealed, s = {};
+    for (const o of others) {
+      if (!sealed.has(o.id)) {
+        sealed.set(o.id, '');
+        net.lobby.relay.seal(o.id, voice.raw).then((t) => { if (voice.sealed === sealed) sealed.set(o.id, t); }, () => sealed.delete(o.id));
+      }
+      if (sealed.get(o.id)) s[o.id] = sealed.get(o.id);
+    }
+    return { i: voice.keyId, s: s };
+  }
+  function takeVoiceKey(hostPeer, vk) {
+    if (!vk || typeof vk.i !== 'string' || vk.i.length > 12 || voice.keys.has(vk.i) || voice.unsealing === vk.i || !voiceOn()) return;
+    const sealed = vk.s && net.myPeer ? vk.s[net.myPeer] : null;
+    if (typeof sealed !== 'string' || sealed.length > 200) return;
+    voice.unsealing = vk.i;
+    net.lobby.relay.unseal(hostPeer, sealed)
+      .then((raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']))
+      .then((key) => { if (net.role === 'guest') keepVoiceKey(vk.i, key); }, () => { /* not for us */ })
+      .then(() => { if (voice.unsealing === vk.i) voice.unsealing = ''; });
+  }
+
   // ---- co-op on the website ----
   // Off claude.ai there is no room capability, so the website passes its messages through public Nostr relays: plain
   // secure websockets, so they get through any network that lets websites through, and players never connect to each
@@ -4200,16 +4565,21 @@
   // ephemeral events, which relays pass on without keeping. The same message goes to every relay and the first copy to
   // arrive counts, so one slow or dead relay doesn't matter. This offers the calls the game uses from claude.ai's room
   // (presence, peers, onPeers, join, leave), so the rest of the co-op code is the same in both places. It loads only
-  // when the Co-op panel is first opened.
+  // when the Co-op panel is first opened. A game room also carries a stream of one-off messages (voice chat) through
+  // `relay.emit`/`relay.onEmit`, and the lobby can seal a few bytes for one player (`relay.seal`/`relay.unseal`).
   const SIGNER_LIB = 'https://cdn.jsdelivr.net/npm/@noble/secp256k1@3.2.0/+esm';
   const RELAYS = ['wss://relay.guggero.org', 'wss://relay.snort.social', 'wss://nostr.hifish.org'];
   const WEB_TOPIC = 'thenucleardonkey.github.io/hellgrid/'; // + the room's name
   const WEB_KIND = 25913; // any kind from 20000 to 29999 is ephemeral
   let webLoading = null;
   async function webLobby() {
-    const { schnorr } = await import(SIGNER_LIB);
+    const { schnorr, getSharedSecret } = await import(SIGNER_LIB);
     const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
-    const keys = schnorr.keygen(), self = hex(keys.publicKey);
+    const unhex = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));
+    const signer = () => { const k = schnorr.keygen(); return { secretKey: k.secretKey, pub: hex(k.publicKey) }; };
+    // Your id signs your state; a second key signs your voice, so each stays well under the relays' limits on
+    // messages per key. Your state says which voice key is yours, so nobody can speak as you.
+    const mainKey = signer(), voiceKey = signer(), self = mainKey.pub;
     const channels = new Map(); // subscription id -> channel
     let subSeq = 0;
 
@@ -4247,20 +4617,53 @@
       ws.onerror = () => { /* onclose follows */ };
     };
     sockets.forEach(dial);
-    window.addEventListener('pagehide', () => { for (const ch of channels.values()) ch.bye(); });
+    window.addEventListener('pagehide', () => { for (const ch of channels.values()) if (ch.bye) ch.bye(); });
 
-    async function publish(topic, body) {
-      const ev = { pubkey: self, created_at: Math.floor(Date.now() / 1000), kind: WEB_KIND, tags: [['x', topic]], content: JSON.stringify(body) };
+    async function publish(topic, body, key) {
+      const k = key || mainKey;
+      const ev = { pubkey: k.pub, created_at: Math.floor(Date.now() / 1000), kind: WEB_KIND, tags: [['x', topic]], content: JSON.stringify(body) };
       const bytes = new TextEncoder().encode(JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content]));
       const id = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
       ev.id = hex(id);
-      ev.sig = hex(await schnorr.signAsync(id, keys.secretKey));
+      ev.sig = hex(await schnorr.signAsync(id, k.secretKey));
       sendAll(JSON.stringify(['EVENT', ev]));
     }
 
+    // Sealing: you and another player can each work out the same secret from your own key and the other's id
+    // (elliptic-curve Diffie-Hellman), and nobody else can. It locks a few bytes so only that player can open them.
+    const shared = new Map();
+    function sharedKey(peer) {
+      if (typeof peer !== 'string' || !/^[0-9a-f]{64}$/.test(peer)) return Promise.reject(new Error('bad id'));
+      if (!shared.has(peer)) {
+        const made = (async () => {
+          const point = getSharedSecret(mainKey.secretKey, unhex('02' + peer)); // the x of the shared point is the same either way up
+          const raw = await crypto.subtle.digest('SHA-256', point.slice(1, 33));
+          return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+        })();
+        made.catch(() => shared.delete(peer));
+        shared.set(peer, made);
+      }
+      return shared.get(peer);
+    }
+    const relayCrypto = {
+      async seal(peer, bytes) {
+        const key = await sharedKey(peer), iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, bytes));
+        const out = new Uint8Array(12 + ct.length);
+        out.set(iv);
+        out.set(ct, 12);
+        return toB64(out);
+      },
+      async unseal(peer, text) {
+        const key = await sharedKey(peer), all = fromB64(text);
+        return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.subarray(0, 12) }, key, all.subarray(12)));
+      }
+    };
+
     const open = (name) => {
-      const topic = WEB_TOPIC + name, others = new Map(), lastSeq = new Map();
+      const topic = WEB_TOPIC + name, others = new Map(), lastSeq = new Map(), voiceOwner = new Map();
       let mine = {}, snap = [], listeners = [], dirty = false, gone = false, sentAt = 0, seq = 0, busy = false;
+      let emitSeq = 0, emitQueue = Promise.resolve(), emitListeners = [];
       const rebuild = () => {
         const you = Object.freeze({ peer: self, by: null, isMe: true, sameTab: true, kind: 'viewer', guest: false, presence: Object.freeze(Object.assign({}, mine)), updatedAt: Date.now() });
         snap = Object.freeze([you].concat(Array.from(others.values())));
@@ -4279,6 +4682,7 @@
           try { body = JSON.parse(ev.content); } catch (e) { return; }
           if (!body || typeof body !== 'object' || !Number.isFinite(body.s) || body.s <= (lastSeq.get(ev.pubkey) || 0)) return;
           lastSeq.set(ev.pubkey, body.s);
+          if (typeof body.k === 'string' && /^[0-9a-f]{64}$/.test(body.k) && !voiceOwner.has(body.k)) voiceOwner.set(body.k, ev.pubkey);
           if (body.bye) { if (others.delete(ev.pubkey)) changed(); return; }
           const st = body.p;
           if (!st || typeof st !== 'object' || Array.isArray(st)) return;
@@ -4287,8 +4691,22 @@
         },
         bye() { if (!gone) publish(topic, { s: ++seq, bye: 1 }).catch(() => { /* they'll time out instead */ }); }
       };
+      // One-off messages: from a voice key that someone's state has claimed, newest only, handed on with their id.
+      const emitCh = {
+        sub: 'hg' + (++subSeq), topic: topic + '/e',
+        hear(ev) {
+          const owner = voiceOwner.get(ev.pubkey);
+          if (gone || !owner || typeof ev.content !== 'string' || ev.content.length > 8000) return;
+          let body;
+          try { body = JSON.parse(ev.content); } catch (e) { return; }
+          if (!body || !Number.isFinite(body.s) || body.s <= (lastSeq.get(ev.pubkey) || 0)) return;
+          lastSeq.set(ev.pubkey, body.s);
+          for (const fn of emitListeners.slice()) { try { fn(body.d, owner); } catch (e) { /* the listener's own problem */ } }
+        }
+      };
       channels.set(ch.sub, ch);
-      for (const s of sockets) subscribe(ch, s);
+      channels.set(emitCh.sub, emitCh);
+      for (const s of sockets) { subscribe(ch, s); subscribe(emitCh, s); }
       // Your latest state goes out about 12 times a second while it changes, and every 2 seconds regardless, so
       // anyone who missed a message soon catches up. Someone silent for 7 seconds has gone.
       const tick = setInterval(() => {
@@ -4297,7 +4715,7 @@
           dirty = false;
           sentAt = now;
           busy = true;
-          publish(topic, { s: ++seq, p: mine }).catch(() => { /* the next one carries the same state */ }).then(() => { busy = false; });
+          publish(topic, { s: ++seq, p: mine, k: voiceKey.pub }).catch(() => { /* the next one carries the same state */ }).then(() => { busy = false; });
         }
         let left = false;
         for (const [id, pr] of others) if (now - pr.updatedAt > 7000) { others.delete(id); left = true; }
@@ -4317,14 +4735,22 @@
         peers: () => snap,
         onPeers(fn) { listeners.push(fn); setTimeout(() => fn({ peers: snap }), 0); return () => { listeners = listeners.filter((f) => f !== fn); }; },
         connected: () => !gone,
+        relay: {
+          emit(data) {
+            if (gone) return;
+            const body = { s: ++emitSeq, d: data };
+            emitQueue = emitQueue.then(() => publish(emitCh.topic, body, voiceKey)).catch(() => { /* lost; the next one follows */ });
+          },
+          onEmit(fn) { emitListeners.push(fn); return () => { emitListeners = emitListeners.filter((f) => f !== fn); }; }
+        },
         leave() {
           if (gone) return Promise.resolve();
           ch.bye();
           gone = true;
           clearInterval(tick);
           listeners = [];
-          channels.delete(ch.sub);
-          sendAll(JSON.stringify(['CLOSE', ch.sub]));
+          emitListeners = [];
+          for (const c of [ch, emitCh]) { channels.delete(c.sub); sendAll(JSON.stringify(['CLOSE', c.sub])); }
           return Promise.resolve();
         }
       };
@@ -4337,6 +4763,7 @@
     }
     const lobby = open('lobby');
     lobby.join = async (name) => open(name);
+    lobby.relay = Object.assign({}, lobby.relay, relayCrypto);
     return lobby;
   }
   function connectWeb() {
@@ -4445,7 +4872,7 @@
     if (open === homeOpen) { if (open) renderHome(); return; }
     homeOpen = open;
     homeEl.hidden = !open;
-    for (const k of Object.keys(keys)) keys[k] = false;
+    releaseKeys();
     scopeMouse = false;
     if (open) {
       homeOpenedAt = performance.now();
