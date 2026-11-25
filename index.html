@@ -4059,20 +4059,74 @@
   });
 
   // ---- co-op on the website ----
-  // Off claude.ai there is no room capability, so the website brings its own: the open-source Trystero library finds
-  // the other players through public Nostr relays, then connects the browsers to each other directly (WebRTC). It
-  // offers the calls the game uses from claude.ai's room (presence, peers, onPeers, join, leave), so the rest of the
-  // co-op code is the same in both places. It loads only when the Co-op panel is first opened.
-  const TRYSTERO = 'https://cdn.jsdelivr.net/npm/trystero@0.27.0/+esm';
+  // Off claude.ai there is no room capability, so the website passes its messages through public Nostr relays: plain
+  // secure websockets, so they get through any network that lets websites through, and players never connect to each
+  // other directly (no one sees anyone else's internet address). Each open page signs its messages with a throwaway
+  // key made when it loads (Nostr relays only take signed messages); its public half is the player's id. Messages are
+  // ephemeral events, which relays pass on without keeping. The same message goes to every relay and the first copy to
+  // arrive counts, so one slow or dead relay doesn't matter. This offers the calls the game uses from claude.ai's room
+  // (presence, peers, onPeers, join, leave), so the rest of the co-op code is the same in both places. It loads only
+  // when the Co-op panel is first opened.
+  const SIGNER_LIB = 'https://cdn.jsdelivr.net/npm/@noble/secp256k1@3.2.0/+esm';
+  const RELAYS = ['wss://relay.guggero.org', 'wss://relay.snort.social', 'wss://nostr.hifish.org'];
+  const WEB_TOPIC = 'thenucleardonkey.github.io/hellgrid/'; // + the room's name
+  const WEB_KIND = 25913; // any kind from 20000 to 29999 is ephemeral
   let webLoading = null;
   async function webLobby() {
-    const { joinRoom } = await import(TRYSTERO);
+    const { schnorr } = await import(SIGNER_LIB);
+    const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    const keys = schnorr.keygen(), self = hex(keys.publicKey);
+    const channels = new Map(); // subscription id -> channel
+    let subSeq = 0;
+
+    // One websocket per relay, shared by the lobby and the game; a dropped one reconnects after a growing pause and
+    // asks again for every open channel.
+    const sockets = RELAYS.map((url) => ({ url, ws: null, wait: 1000, timer: 0 }));
+    const sendTo = (s, msg) => { if (s.ws && s.ws.readyState === 1) { try { s.ws.send(msg); } catch (e) { /* reconnects */ } } };
+    const sendAll = (msg) => { for (const s of sockets) sendTo(s, msg); };
+    const subscribe = (ch, s) => sendTo(s, JSON.stringify(['REQ', ch.sub, { kinds: [WEB_KIND], '#x': [ch.topic], since: Math.floor(Date.now() / 1000) - 60 }]));
+    let anyOpen = null;
+    const opened = new Promise((res) => { anyOpen = res; });
+    const dial = (s) => {
+      let ws;
+      try { ws = new WebSocket(s.url); } catch (e) { return; }
+      s.ws = ws;
+      ws.onopen = () => {
+        s.wait = 1000;
+        for (const ch of channels.values()) subscribe(ch, s);
+        anyOpen(true);
+      };
+      ws.onmessage = (m) => {
+        let d;
+        try { d = JSON.parse(m.data); } catch (e) { return; }
+        if (!Array.isArray(d) || d[0] !== 'EVENT' || !d[2]) return;
+        const ch = channels.get(d[1]);
+        if (ch) ch.hear(d[2]);
+      };
+      ws.onclose = () => {
+        if (s.ws !== ws) return;
+        s.ws = null;
+        clearTimeout(s.timer);
+        s.timer = setTimeout(() => dial(s), s.wait);
+        s.wait = Math.min(30000, s.wait * 2);
+      };
+      ws.onerror = () => { /* onclose follows */ };
+    };
+    sockets.forEach(dial);
+    window.addEventListener('pagehide', () => { for (const ch of channels.values()) ch.bye(); });
+
+    async function publish(topic, body) {
+      const ev = { pubkey: self, created_at: Math.floor(Date.now() / 1000), kind: WEB_KIND, tags: [['x', topic]], content: JSON.stringify(body) };
+      const bytes = new TextEncoder().encode(JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content]));
+      const id = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      ev.id = hex(id);
+      ev.sig = hex(await schnorr.signAsync(id, keys.secretKey));
+      sendAll(JSON.stringify(['EVENT', ev]));
+    }
+
     const open = (name) => {
-      // identity 'none': every open page is its own player, as on claude.ai (two tabs can play each other).
-      const room = joinRoom({ appId: 'thenucleardonkey.github.io/hellgrid', identity: 'none' }, name);
-      const msg = room.makeAction('p');
-      const others = new Map();
-      let mine = {}, self = 'me', snap = [], listeners = [], dirty = false, gone = false, sentAt = 0;
+      const topic = WEB_TOPIC + name, others = new Map(), lastSeq = new Map();
+      let mine = {}, snap = [], listeners = [], dirty = false, gone = false, sentAt = 0, seq = 0, busy = false;
       const rebuild = () => {
         const you = Object.freeze({ peer: self, by: null, isMe: true, sameTab: true, kind: 'viewer', guest: false, presence: Object.freeze(Object.assign({}, mine)), updatedAt: Date.now() });
         snap = Object.freeze([you].concat(Array.from(others.values())));
@@ -4081,23 +4135,40 @@
         rebuild();
         for (const fn of listeners.slice()) { try { fn({ peers: snap }); } catch (e) { /* the listener's own problem */ } }
       };
-      room.getSelf().then((info) => { self = info.peerId; changed(); }, () => { /* keep the placeholder */ });
-      msg.onMessage((data, ctx) => {
-        if (gone || !data || typeof data !== 'object' || Array.isArray(data)) return;
-        others.set(ctx.peerId, Object.freeze({ peer: ctx.peerId, by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false, presence: Object.freeze(data), updatedAt: Date.now() }));
-        changed();
-      });
-      room.onPeerJoin((ctx) => { msg.send(mine, { target: ctx.peerId }).catch(() => { /* they'll get the next one */ }); }, { replay: true });
-      room.onPeerLeave((ctx) => { if (others.delete(ctx.peerId)) changed(); });
-      // Like presence on claude.ai: your latest state goes out about 25 times a second while it changes, and every
-      // 2 seconds regardless, so a lost message is soon made good.
+      const ch = {
+        sub: 'hg' + (++subSeq), topic,
+        // A message from someone else: their newest state, or goodbye. Copies from the other relays, and anything
+        // older than what we already have, are skipped.
+        hear(ev) {
+          if (gone || typeof ev.pubkey !== 'string' || ev.pubkey === self || typeof ev.content !== 'string' || ev.content.length > 8000) return;
+          let body;
+          try { body = JSON.parse(ev.content); } catch (e) { return; }
+          if (!body || typeof body !== 'object' || !Number.isFinite(body.s) || body.s <= (lastSeq.get(ev.pubkey) || 0)) return;
+          lastSeq.set(ev.pubkey, body.s);
+          if (body.bye) { if (others.delete(ev.pubkey)) changed(); return; }
+          const st = body.p;
+          if (!st || typeof st !== 'object' || Array.isArray(st)) return;
+          others.set(ev.pubkey, Object.freeze({ peer: ev.pubkey, by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false, presence: Object.freeze(st), updatedAt: Date.now() }));
+          changed();
+        },
+        bye() { if (!gone) publish(topic, { s: ++seq, bye: 1 }).catch(() => { /* they'll time out instead */ }); }
+      };
+      channels.set(ch.sub, ch);
+      for (const s of sockets) subscribe(ch, s);
+      // Your latest state goes out about 12 times a second while it changes, and every 2 seconds regardless, so
+      // anyone who missed a message soon catches up. Someone silent for 7 seconds has gone.
       const tick = setInterval(() => {
         const now = Date.now();
-        if (gone || (!dirty && now - sentAt < 2000)) return;
-        dirty = false;
-        sentAt = now;
-        msg.send(mine).catch(() => { /* the next one carries the same state */ });
-      }, 40);
+        if (!busy && (dirty || now - sentAt >= 2000)) {
+          dirty = false;
+          sentAt = now;
+          busy = true;
+          publish(topic, { s: ++seq, p: mine }).catch(() => { /* the next one carries the same state */ }).then(() => { busy = false; });
+        }
+        let left = false;
+        for (const [id, pr] of others) if (now - pr.updatedAt > 7000) { others.delete(id); left = true; }
+        if (left) changed();
+      }, 80);
       rebuild();
       return {
         name: name,
@@ -4114,13 +4185,22 @@
         connected: () => !gone,
         leave() {
           if (gone) return Promise.resolve();
+          ch.bye();
           gone = true;
           clearInterval(tick);
           listeners = [];
-          return room.leave().catch(() => { /* gone anyway */ });
+          channels.delete(ch.sub);
+          sendAll(JSON.stringify(['CLOSE', ch.sub]));
+          return Promise.resolve();
         }
       };
     };
+    // Ready once any relay answers; none within 10 seconds means co-op can't work from here right now.
+    const ok = await Promise.race([opened, new Promise((res) => setTimeout(() => res(false), 10000))]);
+    if (!ok) {
+      for (const s of sockets) { clearTimeout(s.timer); const ws = s.ws; s.ws = null; if (ws) { ws.onclose = null; ws.close(); } }
+      throw new Error('no relay');
+    }
     const lobby = open('lobby');
     lobby.join = async (name) => open(name);
     return lobby;
