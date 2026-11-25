@@ -1,0 +1,58 @@
+name: 🐞 Report a bug
+description: Something in Hellgrid is broken, glitchy or not working the way it should.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping make Hellgrid better! The more you tell us, the easier it is to fix.
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: Tell us what happened, and what you expected to happen instead.
+      placeholder: "Example: On wave 4 a demon got stuck inside a wall and I couldn't finish the wave."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we make it happen again?
+      description: The steps you took, if you know them. Skip this if you're not sure.
+      placeholder: "1. Start a Solo game on Hard\n2. Walk to the room on the right\n3. ..."
+  - type: dropdown
+    id: how-often
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Only once so far
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Solo
+        - Co-op
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - Easy
+        - Medium
+        - Hard
+        - Extreme
+        - Hell
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      description: Filled in for you when you use the link in the game.
+      placeholder: "Example: Chrome on Windows laptop, Safari on iPhone"
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or video
+      description: If you have one, drag it into this box.

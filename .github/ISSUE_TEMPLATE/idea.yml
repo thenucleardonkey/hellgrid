@@ -1,0 +1,37 @@
+name: 💡 Suggest an idea
+description: A new feature, weapon, demon, map, mode, or anything else you'd like to see in a future update.
+title: "Idea: "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: Got an idea for Hellgrid? We'd love to hear it!
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of idea is it?
+      options:
+        - New weapon
+        - New demon
+        - New map or level
+        - New game mode
+        - Perks and upgrades
+        - Co-op and multiplayer
+        - Graphics and sound
+        - Controls and settings
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: Describe it. How would it work? Why would it make the game more fun?
+      placeholder: "Example: A flamethrower that sets demons on fire and spreads to the ones next to them."
+    validations:
+      required: true
+  - type: textarea
+    id: picture
+    attributes:
+      label: Drawing or picture
+      description: If you sketched it or found an example, drag the image into this box.

@@ -88,11 +88,9 @@
   .restart {
     font-weight: 700; color: #fff; background: var(--accent); border: 0; padding: 10px 20px;
   }
-  .difficulty { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-  .difficulty button { padding: 8px 14px; font-weight: 600; }
-  .difficulty button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
-  .difficulty button[data-diff="hell"] { color: #ff5a2b; border-color: #b8361c; }
-  .difficulty button[data-diff="hell"][aria-pressed="true"] { background: linear-gradient(#d8401c, #8a1408); color: #fff; border-color: transparent; box-shadow: 0 0 10px rgba(255, 80, 30, 0.55); }
+  .toolbar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .over-actions { display: flex; gap: 10px; }
+  .over-menu { font-weight: 700; padding: 10px 20px; }
   .reload { font-weight: 700; padding: 14px 18px; }
   .scope { font-weight: 700; padding: 14px 24px; }
   .scope[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
@@ -100,6 +98,10 @@
   @media (pointer: coarse) {
     .move { grid-template-columns: repeat(3, 76px); grid-template-rows: repeat(2, 68px); }
     .fire { width: 124px; height: 124px; }
+  }
+  @media (pointer: coarse) and (max-width: 410px) { /* narrow phones: the pad and FIRE fit side by side */
+    .move { grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(2, 64px); }
+    .fire { width: 108px; height: 108px; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
@@ -155,7 +157,6 @@
   @media (pointer: coarse) {
     body.fs { justify-content: flex-start; }
     body.fs .hud { order: -1; }
-    body.fs [data-diff] { display: none; }
     body.fs .controls {
       display: flex; position: fixed; left: 0; right: 0; bottom: 0; width: auto; z-index: 3;
       align-items: flex-end; pointer-events: none;
@@ -225,6 +226,76 @@
     text-align: center; pointer-events: none;
   }
   .team[hidden], .banner[hidden] { display: none; }
+
+  /* Home screen: shown when the game opens, and as the pause menu (Menu button or Esc). It covers the page; the
+     settings and co-op panels open over it. */
+  .home {
+    position: fixed; inset: 0; z-index: 45; display: flex; overflow-y: auto; box-sizing: border-box;
+    padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    background:
+      radial-gradient(ellipse 90% 55% at 50% -5%, rgba(224, 82, 47, 0.32), transparent 70%),
+      radial-gradient(ellipse 80% 45% at 50% 108%, rgba(140, 18, 8, 0.45), transparent 70%),
+      var(--bg);
+  }
+  .home[hidden] { display: none; }
+  .home-box { margin: auto; width: min(100%, 540px); display: flex; flex-direction: column; gap: 12px; }
+  .home-logo { text-align: center; margin-bottom: 4px; }
+  .home-logo h2 {
+    margin: 0; font-size: clamp(40px, 12vw, 68px); line-height: 1.05; font-weight: 900; letter-spacing: 0.16em;
+    text-transform: uppercase; padding-left: 0.16em; /* balances the spacing after the last letter */
+    background: linear-gradient(#ffe3b8 10%, #ff7a3d 55%, #b3200f 95%); -webkit-background-clip: text; background-clip: text;
+    color: transparent; filter: drop-shadow(0 0 16px rgba(255, 90, 40, 0.45)); animation: home-glow 4s ease-in-out infinite;
+  }
+  @keyframes home-glow { 50% { filter: drop-shadow(0 0 26px rgba(255, 90, 40, 0.7)); } }
+  .home-logo p { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+  .home-card { background: rgba(28, 16, 16, 0.88); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px; }
+  .home-card h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent); }
+  .home-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mode-tile {
+    display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; align-items: center;
+    padding: 12px; text-align: left; background: #221311;
+  }
+  .mode-icon { grid-row: span 2; font-size: 26px; line-height: 1; }
+  .mode-tile b { font-size: 16px; }
+  .mode-tile small { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+  .mode-tile[aria-pressed="true"] { border-color: var(--accent); background: #2e1612; box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(224, 82, 47, 0.25); }
+  .home-diffs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .home-diffs button { flex: 1 1 auto; padding: 9px 12px; font-weight: 600; }
+  .home-diffs button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+  .home-diffs button[data-diff="hell"] { color: #ff5a2b; border-color: #b8361c; }
+  .home-diffs button[data-diff="hell"][aria-pressed="true"] { background: linear-gradient(#d8401c, #8a1408); color: #fff; border-color: transparent; box-shadow: 0 0 10px rgba(255, 80, 30, 0.55); }
+  .home-diffs button:disabled { opacity: 0.45; cursor: default; }
+  .home-diffs button[aria-pressed="true"]:disabled { opacity: 0.8; }
+  .home-diff-text { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; min-height: 2.8em; }
+  .home-note { margin: 0; text-align: center; color: #ffb59c; font-size: 13.5px; }
+  .home-note:empty { display: none; }
+  .home-play { display: flex; gap: 10px; }
+  .home-primary, .home-secondary { flex: 1; padding: 14px 16px; font-size: 17px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+  .home-primary { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 0 var(--shadow), 0 8px 24px rgba(224, 82, 47, 0.35); }
+  .home-secondary[hidden] { display: none; }
+  .home-tools { display: flex; gap: 8px; justify-content: center; }
+  .home-tools button { padding: 8px 14px; font-weight: 600; }
+  .home-foot { text-align: center; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 2px; }
+  .home-foot p { margin: 0 0 8px; font-size: 13.5px; }
+  .home-links { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .home-links a {
+    color: var(--fg); text-decoration: none; font-weight: 600; padding: 8px 14px; border-radius: 12px;
+    background: var(--panel); border: 1px solid rgba(224, 82, 47, 0.35);
+  }
+  .home-links a:hover { border-color: var(--accent); }
+  .home-links a:focus-visible, .home-foot small a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .home-foot small { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .home-foot small a { color: var(--fg); }
+  .home-keys { margin: 0; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  @media (pointer: coarse) { .home-keys { display: none; } }
+  @media (max-width: 420px) {
+    .home-modes { gap: 8px; }
+    .mode-tile { grid-template-columns: 1fr; padding: 10px; row-gap: 2px; }
+    .mode-icon { grid-row: auto; font-size: 22px; }
+    .home-diffs { gap: 6px; }
+    .home-diffs button { padding: 8px 9px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .home-logo h2 { animation: none; } }
 </style>
 
 <h1>Hellgrid</h1>
@@ -233,7 +304,10 @@
   <canvas id="screen" width="480" height="300" aria-hidden="true"></canvas>
   <div class="overlay" id="msg" hidden>
     <p id="msg-text"></p>
-    <button type="button" class="restart" id="restart">Play again</button>
+    <div class="over-actions">
+      <button type="button" class="restart" id="restart">Play again</button>
+      <button type="button" class="over-menu" id="over-menu">Menu</button>
+    </div>
   </div>
   <div class="fps" id="fps" hidden></div>
   <div class="perk-hud" id="perk-hud" hidden></div>
@@ -246,12 +320,8 @@
   <span>Gun <b id="gun">Pistol</b></span>
   <span>Wave <b id="wave">0/8</b></span>
 </div>
-<div class="difficulty" role="group" aria-label="Difficulty">
-  <button type="button" data-diff="easy" aria-pressed="false">Easy</button>
-  <button type="button" data-diff="medium" aria-pressed="true">Medium</button>
-  <button type="button" data-diff="hard" aria-pressed="false">Hard</button>
-  <button type="button" data-diff="extreme" aria-pressed="false">Extreme</button>
-  <button type="button" data-diff="hell" aria-pressed="false" title="Tougher, faster, more demons, and fewer medkits">🔥 Hell</button>
+<div class="toolbar" role="group" aria-label="Game">
+  <button type="button" class="settings-btn" id="home-btn" aria-haspopup="dialog">☰ Menu</button>
   <button type="button" class="settings-btn" id="open-settings" aria-haspopup="dialog">⚙ Settings</button>
   <button type="button" class="settings-btn fs-btn" id="fs-btn"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/></svg><span id="fs-label">Fullscreen</span></button>
   <button type="button" class="settings-btn" id="coop-btn" aria-haspopup="dialog">👥 Co-op</button>
@@ -271,7 +341,7 @@
     <button type="button" class="scope" id="scope-btn" aria-pressed="false" aria-label="Scope">SCOPE</button>
   </div>
 </div>
-<p class="hint">WASD or arrows to move, Space or F to fire, R to reload, right mouse button or E to scope. Click the view for mouse look. Esc opens settings, where you can rebind keys.</p>
+<p class="hint">WASD or arrows to move, Space or F to fire, R to reload, right mouse button or E to scope. Click the view for mouse look. Esc opens the menu.</p>
 
 <div class="backdrop" id="settings" hidden>
   <div class="panel-box" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -347,6 +417,51 @@
         </span>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="home" id="home" role="dialog" aria-modal="true" aria-labelledby="home-title">
+  <div class="home-box">
+    <header class="home-logo">
+      <h2 id="home-title">Hellgrid</h2>
+      <p>Survive 8 waves of demons, alone or with friends.</p>
+    </header>
+    <section class="home-card" aria-labelledby="home-mode-h">
+      <h3 id="home-mode-h">Mode</h3>
+      <div class="home-modes">
+        <button type="button" class="mode-tile" data-mode="solo" aria-pressed="true"><span class="mode-icon" aria-hidden="true">🎯</span><b>Solo</b><small>Just you against the horde</small></button>
+        <button type="button" class="mode-tile" data-mode="coop" aria-pressed="false"><span class="mode-icon" aria-hidden="true">👥</span><b>Co-op</b><small>Up to 4 players online</small></button>
+      </div>
+    </section>
+    <section class="home-card" aria-labelledby="home-diff-h">
+      <h3 id="home-diff-h">Difficulty</h3>
+      <div class="home-diffs">
+        <button type="button" data-diff="easy" aria-pressed="false">Easy</button>
+        <button type="button" data-diff="medium" aria-pressed="true">Medium</button>
+        <button type="button" data-diff="hard" aria-pressed="false">Hard</button>
+        <button type="button" data-diff="extreme" aria-pressed="false">Extreme</button>
+        <button type="button" data-diff="hell" aria-pressed="false">🔥 Hell</button>
+      </div>
+      <p class="home-diff-text" id="home-diff-text"></p>
+    </section>
+    <p class="home-note" id="home-note" role="status"></p>
+    <div class="home-play">
+      <button type="button" class="home-primary" id="home-primary">Play</button>
+      <button type="button" class="home-secondary" id="home-secondary" hidden>New game</button>
+    </div>
+    <div class="home-tools">
+      <button type="button" id="home-settings" aria-haspopup="dialog">⚙ Settings</button>
+      <button type="button" class="fs-btn" id="home-fs"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/></svg><span id="home-fs-label">Fullscreen</span></button>
+    </div>
+    <footer class="home-foot">
+      <p>Found a bug, or got an idea for the next update?</p>
+      <div class="home-links">
+        <a id="home-bug" href="https://github.com/thenucleardonkey/hellgrid/issues/new?template=bug.yml" target="_blank" rel="noopener">🐞 Report a bug</a>
+        <a id="home-idea" href="https://github.com/thenucleardonkey/hellgrid/issues/new?template=idea.yml" target="_blank" rel="noopener">💡 Suggest an idea</a>
+      </div>
+      <small>Opens Hellgrid’s page on GitHub, where you need a free account to post. <a href="https://github.com/thenucleardonkey/hellgrid/issues" target="_blank" rel="noopener">See what others reported</a></small>
+    </footer>
+    <p class="home-keys" id="home-keys">WASD move · mouse or arrows turn · Space, F or click to fire · R reload · E or right-click scope · Esc menu</p>
   </div>
 </div>
 
@@ -2558,7 +2673,7 @@
     for (const k of Object.keys(keys)) keys[k] = false; // nothing stays held while the game waits
     scopeMouse = false;
     perkRelock = document.pointerLockElement === canvas;
-    if (perkRelock && document.exitPointerLock) document.exitPointerLock(); // bring back the cursor for the cards
+    if (perkRelock) releasePointer(); // bring back the cursor for the cards
     renderPerkPick();
     perkPickEl.hidden = false;
     perkBoxEl.focus();
@@ -3105,12 +3220,20 @@
     gunEl.textContent = gun().name;
   }
 
-  // Keyboard. Esc opens and closes settings; while rebinding, the next key press becomes the binding.
+  // Keyboard. Esc closes an open panel, and otherwise opens the menu or goes back to the game from it; while
+  // rebinding, the next key press becomes the binding.
   window.addEventListener('keydown', (e) => {
     audioInit();
     if (capture) { e.preventDefault(); finishCapture(e.code); return; }
-    if (e.code === 'Escape') { e.preventDefault(); if (coopOpen) setCoopOpen(false); else setSettingsOpen(!settingsOpen); return; }
-    if (settingsOpen || coopOpen || e.target instanceof HTMLInputElement) return;
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      if (coopOpen) setCoopOpen(false);
+      else if (settingsOpen) setSettingsOpen(false);
+      else if (homeOpen) { if (gameGoing() && performance.now() - homeOpenedAt > 300) resumeGame(); }
+      else setHomeOpen(true);
+      return;
+    }
+    if (settingsOpen || coopOpen || homeOpen || e.target instanceof HTMLInputElement) return;
     // While choosing a perk, 1 2 3 pick a card and the game keys rest (Tab and Enter still work on the cards).
     if (perkOpen) {
       const n = PERK_KEYS[e.code];
@@ -3157,6 +3280,17 @@
   canvas.addEventListener('click', () => {
     if (document.pointerLockElement !== canvas) lockPointer();
   });
+  // Opening a panel lets go of the mouse on purpose. When the browser lets go instead (Esc during mouse look, or
+  // switching to another window), the game opens its menu, so a solo game pauses rather than carrying on unseen.
+  let selfUnlock = false;
+  function releasePointer() {
+    if (document.pointerLockElement && document.exitPointerLock) { selfUnlock = true; document.exitPointerLock(); }
+  }
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement) { selfUnlock = false; return; }
+    if (selfUnlock) { selfUnlock = false; return; }
+    if (!homeOpen && !settingsOpen && !coopOpen && !perkOpen && !over && gameGoing()) { homeRelock = true; setHomeOpen(true); }
+  });
   // The right button holds the scope up; it never opens the browser's menu over the view.
   canvas.addEventListener('mousedown', (e) => {
     if (e.button === 2) scopeMouse = true;
@@ -3200,17 +3334,9 @@
 
   document.getElementById('restart').addEventListener('click', () => restartGame());
 
-  // Difficulty buttons: choosing one starts a new game at that level. Online, only the host chooses.
+  // Difficulty buttons (on the home screen) show a level; the home screen's Play or New game starts it.
   const setDiffButtons = (name) => document.querySelectorAll('[data-diff]').forEach((o) => o.setAttribute('aria-pressed', String(o.dataset.diff === name)));
   const diffName = () => Object.keys(DIFFICULTY).find((k) => DIFFICULTY[k] === diff) || 'medium';
-  document.querySelectorAll('[data-diff]').forEach((b) => {
-    b.addEventListener('click', () => {
-      if (net.role === 'guest') return;
-      setDiffButtons(b.dataset.diff);
-      diff = DIFFICULTY[b.dataset.diff];
-      restartGame();
-    });
-  });
 
   // ---- settings panel ----
   const $ = (id) => document.getElementById(id);
@@ -3234,11 +3360,11 @@
     for (const k of Object.keys(keys)) keys[k] = false;
     scopeMouse = false;
     if (open) {
-      if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+      releasePointer();
       syncPanel();
       $('close-settings').focus();
     } else {
-      (perkOpen ? perkBoxEl : $('open-settings')).focus(); // back to the perk chooser if it is waiting
+      (perkOpen && !homeOpen ? perkBoxEl : homeOpen ? $('home-settings') : $('open-settings')).focus(); // back where it was opened from
     }
   }
 
@@ -3340,7 +3466,7 @@
   function setFullscreenLayout(on) {
     fullscreen = on;
     document.body.classList.toggle('fs', on);
-    $('fs-label').textContent = on ? 'Exit fullscreen' : 'Fullscreen';
+    $('fs-label').textContent = $('home-fs-label').textContent = on ? 'Exit fullscreen' : 'Fullscreen';
     fitCanvases();
   }
   $('fs-btn').addEventListener('click', async () => {
@@ -3819,7 +3945,9 @@
     try { g = await net.lobby.join(name); } catch (e) { net.note = 'Could not open a game just now. Try again in a moment.'; renderCoop(); return; }
     net.game = g; net.role = 'host'; net.name = name; net.ep = 1; net.phase = 'wait'; net.note = '';
     others = []; players = [me]; me.color = 0; net.shotSeen.clear(); net.myPick = 0; net.myShots = [];
+    diff = DIFFICULTY[homeDiff];
     reset();
+    setHomeOpen(false);
     g.onPeers(() => renderCoop(), () => leaveGame('Lost the connection to the game.'));
     sendPresence(true);
     lobbyPresence();
@@ -3833,6 +3961,7 @@
     net.joinedAt = net.hostSeenAt = performance.now(); net.lastHostState = null;
     others = []; players = [me]; net.shotSeen.clear(); net.stats = new Map();
     guestNewGame();
+    setHomeOpen(false);
     g.onPeers(() => renderCoop(), () => leaveGame('Lost the connection to the game.'));
     sendPresence(true);
     lobbyPresence();
@@ -3846,11 +3975,12 @@
     others = []; players = [me]; net.shotSeen.clear(); net.demons.clear(); net.myPick = 0; net.offerWave = 0;
     me.color = 0;
     net.note = note || '';
+    started = false;
     reset();
     lobbyPresence();
     renderCoop();
     renderTeam();
-    if (note && !coopOpen) showNotice(note);
+    if (!coopOpen) { homeNote = note || ''; setHomeOpen(true); }
   }
   // The host starts a game (or a new one): everyone back to the start with fresh health, guns and perks.
   function hostNewGame(phase) {
@@ -3961,14 +4091,18 @@
     for (const k of Object.keys(keys)) keys[k] = false;
     scopeMouse = false;
     if (open) {
-      if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+      releasePointer();
       $('coop-nick').value = net.nick;
       if (net.status === 'web') connectWeb();
       renderCoop();
       $('close-coop').focus();
     } else {
       net.note = '';
-      (perkOpen ? perkBoxEl : $('coop-btn')).focus();
+      const backHome = !gameGoing() || (coopFromHome && !net.role); // no game joined: back to the home screen
+      coopFromHome = false;
+      if (backHome) setHomeOpen(true);
+      else if (homeOpen) $('home-primary').focus();
+      else (perkOpen ? perkBoxEl : $('coop-btn')).focus();
     }
   }
   function coopItem(main, sub, button) {
@@ -4250,9 +4384,134 @@
     }
   })(6);
 
+  // ---- home screen ----
+  // It shows when the game opens, and it is the pause menu: the Menu button, Esc, or the mouse being let go mid-game
+  // open it. A solo game waits while it is open; online the game carries on and only your own player stops, as with
+  // every menu. Mode and difficulty are remembered for next time. The difficulty takes effect when a game starts.
+  const HOME_KEY = 'hellgrid.home';
+  const DIFF_TEXT = {
+    easy: 'Fewer, slower demons with softer bites. Good for learning the ropes.',
+    medium: 'The standard fight.',
+    hard: 'More demons, and they’re faster and bite harder.',
+    extreme: 'A swarm of fast, hard-biting demons.',
+    hell: 'The most demons, fastest and hardest-biting. Big demons take more hits, and there are only 2 medkits.'
+  };
+  const homeEl = $('home');
+  let homeOpen = true, homeOpenedAt = 0, homeRelock = false, homeMode = 'solo', homeDiff = 'medium', homeNote = '';
+  let started = false, coopFromHome = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_KEY) || 'null');
+    if (saved && (saved.mode === 'solo' || saved.mode === 'coop')) homeMode = saved.mode;
+    if (saved && typeof saved.diff === 'string' && DIFFICULTY.hasOwnProperty(saved.diff)) homeDiff = saved.diff;
+  } catch (e) { /* defaults */ }
+  diff = DIFFICULTY[homeDiff];
+  const saveHome = () => {
+    try { localStorage.setItem(HOME_KEY, JSON.stringify({ mode: homeMode, diff: homeDiff })); } catch (e) { /* this visit only */ }
+  };
+  // A game is going when you're online, or a solo game has started and isn't over yet.
+  function gameGoing() { return !!net.role || (started && !over); }
+
+  // Browser and system, filled into the bug form so a report says where it happened.
+  function deviceName() {
+    const ua = navigator.userAgent;
+    const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /SamsungBrowser/.test(ua) ? 'Samsung Internet'
+      : /Firefox\/|FxiOS/.test(ua) ? 'Firefox' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other browser';
+    const system = /Android/.test(ua) ? 'Android' : /iPhone|iPod/.test(ua) ? 'iPhone'
+      : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'iPad' : /CrOS/.test(ua) ? 'Chromebook'
+      : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'other device';
+    return browser + ' on ' + system;
+  }
+
+  function renderHome() {
+    const guest = net.role === 'guest', going = gameGoing();
+    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === homeMode)));
+    const shown = guest ? diffName() : homeDiff;
+    setDiffButtons(shown);
+    document.querySelectorAll('[data-diff]').forEach((b) => { b.disabled = guest; });
+    $('home-diff-text').textContent = DIFF_TEXT[shown] + (guest ? ' The host picks the difficulty.' : '');
+    $('home-note').textContent = homeNote || (net.role === 'host' ? 'You’re hosting an online game.' : guest ? 'You’re in an online game.' : '');
+    // The big button goes back to a game that is going, or starts one. The second one starts a different game.
+    let alt = '';
+    if (going && net.role) alt = homeMode === 'solo' ? 'Leave and play solo' : guest ? '' : 'Restart for everyone';
+    else if (going) alt = homeMode === 'solo' ? 'New game' : 'Play online';
+    $('home-primary').textContent = going ? 'Resume' : homeMode === 'coop' ? 'Play online' : 'Play';
+    $('home-secondary').textContent = alt;
+    $('home-secondary').hidden = !alt;
+    $('home-bug').href = 'https://github.com/thenucleardonkey/hellgrid/issues/new?template=bug.yml&device=' + encodeURIComponent(deviceName()) +
+      '&mode=' + (net.role ? 'Co-op' : 'Solo') + '&difficulty=' + encodeURIComponent(shown.charAt(0).toUpperCase() + shown.slice(1));
+  }
+  function setHomeOpen(open) {
+    if (!open) homeNote = '';
+    if (open === homeOpen) { if (open) renderHome(); return; }
+    homeOpen = open;
+    homeEl.hidden = !open;
+    for (const k of Object.keys(keys)) keys[k] = false;
+    scopeMouse = false;
+    if (open) {
+      homeOpenedAt = performance.now();
+      homeRelock = homeRelock || document.pointerLockElement === canvas;
+      releasePointer();
+      if (net.role) homeMode = 'coop';
+      if (gameGoing()) homeDiff = diffName(); // what's being played
+      renderHome();
+      $('home-primary').focus();
+    } else if (perkOpen) perkBoxEl.focus();
+    else if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+  function resumeGame() {
+    const relock = homeRelock;
+    homeRelock = false;
+    setHomeOpen(false);
+    if (relock) lockPointer(); // back to mouse look, if that's where you were
+  }
+  function startSolo() {
+    if (net.role) leaveGame('');
+    diff = DIFFICULTY[homeDiff];
+    saveHome();
+    reset();
+    started = true;
+    homeRelock = false;
+    setHomeOpen(false);
+  }
+  function playOnline() {
+    saveHome();
+    homeRelock = false;
+    setHomeOpen(false);
+    coopFromHome = true;
+    setCoopOpen(true);
+  }
+  function restartForAll() {
+    diff = DIFFICULTY[homeDiff];
+    saveHome();
+    restartGame();
+    resumeGame();
+  }
+  $('home-primary').addEventListener('click', () => {
+    if (gameGoing()) resumeGame();
+    else if (homeMode === 'coop') playOnline();
+    else startSolo();
+  });
+  $('home-secondary').addEventListener('click', () => {
+    if (net.role) { if (homeMode === 'solo') startSolo(); else if (net.role === 'host') restartForAll(); }
+    else if (homeMode === 'solo') startSolo();
+    else playOnline();
+  });
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { homeMode = b.dataset.mode; renderHome(); }));
+  document.querySelectorAll('[data-diff]').forEach((b) => b.addEventListener('click', () => {
+    if (net.role === 'guest') return; // the host decides
+    homeDiff = b.dataset.diff;
+    renderHome();
+  }));
+  $('home-settings').addEventListener('click', () => setSettingsOpen(true));
+  $('home-fs').addEventListener('click', () => $('fs-btn').click());
+  $('home-btn').addEventListener('click', () => setHomeOpen(true));
+  $('over-menu').addEventListener('click', () => setHomeOpen(true));
+
   applyQuality();
   applySettings();
   reset();
+  renderHome();
+  $('home-primary').focus({ preventScroll: true });
   let last = performance.now();
   let fpsFrames = 0, fpsTime = 0;
   function frame(now) {
@@ -4263,11 +4522,11 @@
     last = now;
     if (net.role) {
       // Online the game never pauses: menus only stop your own player.
-      updateLocal(dt, !settingsOpen && !perkOpen && !coopOpen);
+      updateLocal(dt, !settingsOpen && !perkOpen && !coopOpen && !homeOpen);
       if (net.role === 'host') updateWorld(dt); else updateGuestWorld(dt);
       updateFx(dt);
       netStep(dt);
-    } else if (!settingsOpen && !perkOpen && !coopOpen) {
+    } else if (!settingsOpen && !perkOpen && !coopOpen && !homeOpen) {
       update(dt);
       updateFx(dt);
     }
