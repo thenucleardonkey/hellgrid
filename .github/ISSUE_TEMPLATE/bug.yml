@@ -36,6 +36,13 @@ body:
         - Solo
         - Co-op
   - type: dropdown
+    id: level
+    attributes:
+      label: Level
+      options:
+        - 1 · The Pit
+        - 2 · Frozen Depths
+  - type: dropdown
     id: difficulty
     attributes:
       label: Difficulty
